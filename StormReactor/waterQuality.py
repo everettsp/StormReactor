@@ -2,7 +2,15 @@ from pyswmm import Simulation, Nodes, Links
 import pyswmm.toolkitapi as tka
 import numpy as np
 from scipy.integrate import ode
-from enum import Enum
+
+import pandas as pd
+
+from StormReactor import wqConfig
+
+from StormReactor._standardization import _standardize_method, _standardize_parameters
+
+import warnings
+from StormReactor.defs.ElementType import ElementType
 
 # List of Exception Classes
 class PySWMMStepAdvanceNotSupported(Exception):
@@ -13,10 +21,19 @@ class PySWMMStepAdvanceNotSupported(Exception):
         self.message = "PySWMM sim.step_advance() feature is currently unsuppprted."
         super().__init__(self.message)
 
+class WQStorage:
+    def __init__(self, element_ids, pollutants, flag:int=0):
+        self.element_ids = element_ids
+        self.pollutants = pollutants
+        self.values = np.zeros(shape=[len(element_ids),len(pollutants)])
+        self.flag = flag # 0 for nodes, 1 for links
+        self.df = pd.DataFrame(self.values, index=self.element_ids, columns=self.pollutants)
 
-class ElementType(Enum):
-    Nodes = 0
-    Links = 1
+    def _get_storage(self, element_id, pollutant):
+        return self.df.loc[element_id, pollutant]
+
+    def _set_storage(self, element_id, pollutant, value):
+        self.df.at[element_id, pollutant] = value
 
 class waterQuality:
     """
@@ -52,12 +69,16 @@ class waterQuality:
     """
 
     # Initialize class
-    def __init__(self, sim, config):
+    def __init__(self, sim, config:list[wqConfig]):
         self.sim = sim
         self.config = config
         self.start_time = self.sim.start_time
         self.last_timestep = self.start_time
         self.solver = ode(self._CSTR_tank)
+
+        self.storage = WQStorage(
+            element_ids = np.unique([c.element_id for c in self.config]),
+            pollutants = np.unique([c.pollutant for c in self.config]))
 
         # Water quality methods
         self.method = {
@@ -71,6 +92,8 @@ class waterQuality:
             #"Erosion": self._Erosion,
             "CSTR": self._CSTRSolver,
             "Phosphorus": self._Phosphorus,
+            "SewageSettling": self._SewageSettling,
+            "SewageResuspension": self._SewageResuspension,
             }
 
 
@@ -83,16 +106,10 @@ class waterQuality:
         if self.sim._advance_seconds:
             raise(PySWMMStepAdvanceNotSupported)
 
-        # Parse all the elements and their parameters in the config dictionary
-        for asset_ID, asset_info in self.config.items():
-            attribute = self.config[asset_ID]['method']
-            element_type = self.config[asset_ID]['type']
-            if element_type == "node":
-                element_type = ElementType.Nodes
-            else:
-                element_type = ElementType.Links
-            # Call the water quality method for each element
-            self.method[attribute](asset_ID, self.config[asset_ID]['pollutant'], self.config[asset_ID]['parameters'], element_type)
+        # for each config, run the water quality method
+        for c in self.config:
+            self.method[c.method](id=c.element_id, pollutant=c.pollutant, parameters=c.parameters, element_type=c.element_type)
+
 
         #Update timestep after water quality methods are completed
         self.last_timestep = self.sim.current_time
@@ -108,21 +125,21 @@ class waterQuality:
             raise(PySWMMStepAdvanceNotSupported)
 
         # Parse all the elements and their parameters in the config dictionary
-        for asset_ID, asset_info in self.config.items():
-            attribute = self.config[asset_ID]['method']
-            element_type = self.config[asset_ID]['type']
+        for element_id, element_info in self.config.items():
+            attribute = self.config[element_id]['method']
+            element_type = self.config[element_id]['type']
             if element_type == "node":
                 element_type = ElementType.Nodes
             else:
                 print("CSTR does not work for links.")
             # Call the water quality method for each element
-            self.method[attribute](index, asset_ID, self.config[asset_ID]['pollutant'], self.config[asset_ID]['parameters'], element_type)
+            self.method[attribute](index, element_id, self.config[element_id]['pollutant'], self.config[element_id]['parameters'], element_type)
 
         #Update timestep after water quality methods are completed
         self.last_timestep = self.sim.current_time
 
 
-    def _EventMeanConc(self, ID, pollutantID, parameters, element_type):
+    def _EventMeanConc(self, id, pollutant, parameters, element_type):
         """
         Event Mean Concentration Treatment (SWMM Water Quality Manual, 2016)
         Treatment results in a constant concentration.
@@ -130,16 +147,18 @@ class waterQuality:
         Treatment method parameters required:
         C = constant treatment concentration for each pollutant (SI/US: mg/L)
         """
+    
+        _standardize_parameters(parameters, method="EventMeanConc")
 
         if element_type == ElementType.Nodes:
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, parameters["C"])
+            self.sim._model.setNodePollut(id, pollutant, parameters["C"])
         else:
             # Set new concentration
-            self.sim._model.setLinkPollut(ID, pollutantID, parameters["C"])
+            self.sim._model.setLinkPollut(id, pollutant, parameters["C"])
 
 
-    def _ConstantRemoval(self, ID, pollutantID, parameters, element_type):
+    def _ConstantRemoval(self, id, pollutant, parameters, element_type):
         """
         CONSTANT REMOVAL TREATMENT (SWMM Water Quality Manual, 2016)
         Treatment results in a constant percent removal.
@@ -147,25 +166,25 @@ class waterQuality:
         R = pollutant removal fraction (unitless)
         """
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameter
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
             # Calculate new concentration
             Cnew = (1-parameters["R"])*Cin
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
         else:
             # Get SWMM parameter
-            Cin = self.sim._model.getLinkPollut(ID, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
             # Calculate new concentration
             Cnew = (1-parameters["R"])*Cin
             # Set new concentration
-            self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
 
-    def _CoRemoval(self, ID, pollutantID, parameters, element_type):
+    def _CoRemoval(self, id, pollutant, parameters, element_type):
         """
         CO-REMOVAL TREATMENT (SWMM Water Quality Manual, 2016)
         Removal of some pollutant is proportional to the removal of
@@ -175,26 +194,28 @@ class waterQuality:
         R2 = pollutant removal fraction for other pollutant (unitless)
         """
 
+        _standardize_parameters(parameters, method="CoRemoval")
+
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameter
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
             # Calculate new concentration
             Cnew = (1-parameters["R1"]*parameters["R2"])*Cin
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
         else:
             # Get SWMM parameter
-            Cin = self.sim._model.getLinkPollut(ID, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
             # Calculate new concentration
             Cnew = (1-parameters["R1"]*parameters["R2"])*Cin
             # Set new concentration
-            self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
 
-    def _ConcDependRemoval(self, ID, pollutantID, parameters, element_type):
+    def _ConcDependRemoval(self, id, pollutant, parameters, element_type):
         """
         CONCENTRATION-DEPENDENT REMOVAL (SWMM Water Quality Manual, 2016)
         When higher pollutant removal efficiencies occur with higher
@@ -205,13 +226,14 @@ class waterQuality:
         R_u = upper removal rate (unitless)
         """
 
-        parameters = parameters
+        _standardize_parameters(parameters, method="ConcDependRemoval")
+
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameter
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
             # Calculate removal
             R = (1-np.heaviside((Cin-parameters["BC"]), 0))\
             *parameters["R_l"]+np.heaviside((Cin\
@@ -219,10 +241,10 @@ class waterQuality:
             # Calculate new concentration
             Cnew = (1-R)*Cin
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
         else:
             # Get SWMM parameter
-            Cin = self.sim._model.getLinkPollut(ID, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
             # Calculate removal
             R = (1-np.heaviside((Cin-parameters["BC"]), 0))\
             *parameters["R_l"]+np.heaviside((Cin\
@@ -230,10 +252,10 @@ class waterQuality:
             # Calculate new concentration
             Cnew = (1-R)*Cin
             # Set new concentration
-            self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
 
-    def _NthOrderReaction(self, ID, pollutantID, parameters, element_type):
+    def _NthOrderReaction(self, id, pollutant, parameters, element_type):
             """
             NTH ORDER REACTION KINETICS (SWMM Water Quality Manual, 2016)
             When treatment of pollutant X exhibits n-th order reaction kinetics
@@ -243,9 +265,10 @@ class waterQuality:
             n   = reaction order (first order, second order, etc.) (unitless)
             """
 
-            parameters = parameters
+            _standardize_parameters(parameters, method="NthOrderReaction")
+
             # Get pollutant index
-            pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+            pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
             # Get current time
             current_step = self.sim.current_time
@@ -254,21 +277,21 @@ class waterQuality:
 
             if element_type == ElementType.Nodes:
                 # Get SWMM parameter
-                C = self.sim._model.getNodePollut(ID, tka.NodePollut.reactorQual.value)[pollutant_index]
+                C = self.sim._model.getNodePollut(id, tka.NodePollut.reactorQual.value)[pollutant_index]
                 # Calculate treatment
                 Cnew = C - (parameters["k"]*(C**parameters["n"])*dt)
                 # Set new concentration
-                self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+                self.sim._model.setNodePollut(id, pollutant, Cnew)
             else:
                 # Get SWMM parameter
-                C = self.sim._model.getLinkPollut(ID, tka.LinkPollut.reactorQual.value)[pollutant_index]
+                C = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
                 # Calculate treatment
                 Cnew = C - (parameters["k"]*(C**parameters["n"])*dt)
                 # Set new concentration
-                self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+                self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
 
-    def _kCModel(self, ID, pollutantID, parameters, element_type):
+    def _kCModel(self, id, pollutant, parameters, element_type):
         """
         K-C_STAR MODEL (SWMM Water Quality Manual, 2016)
         The first-order model with background concentration made popular by
@@ -277,16 +300,17 @@ class waterQuality:
         k   = reaction rate constant (SI: m/hr, US: ft/hr)
         C_s = constant residual concentration that always remains (SI/US: mg/L)
         """
+        
+        _standardize_parameters(parameters, method="kCModel")
 
-        parameters = parameters
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameters
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
-            d = self.sim._model.getNodeResult(ID, tka.NodeResults.newDepth.value)
-            hrt = self.sim._model.getNodeResult(ID, tka.NodeResults.hyd_res_time.value)
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            d = self.sim._model.getNodeResult(id, tka.NodeResults.newDepth.value)
+            hrt = self.sim._model.getNodeResult(id, tka.NodeResults.hyd_res_time.value)
             # Calculate removal
             if d != 0.0 and Cin != 0.0:
                 R = np.heaviside((Cin-parameters["C_s"]), 0)\
@@ -296,12 +320,12 @@ class waterQuality:
             # Calculate new concentration
             Cnew = (1-R)*Cin
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
         else:
             print("kCModel does not work for links.")
 
 
-    def _GravitySettling(self, ID, pollutantID, parameters, element_type):
+    def _GravitySettling(self, id, pollutant, parameters, element_type):
         """
         GRAVITY SETTLING (SWMM Water Quality Manual, 2016)
         During a quiescent period of time within a storage volume, a fraction
@@ -311,9 +335,10 @@ class waterQuality:
         C_s = constant residual concentration that always remains (SI/US: mg/L)
         """
 
-        parameters = parameters
+        _standardize_parameters(parameters, method="GravitySettling")
+
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         # Get current time
         current_step = self.sim.current_time
@@ -322,9 +347,9 @@ class waterQuality:
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameters
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
-            Qin = self.sim._model.getNodeResult(ID, tka.NodeResults.totalinflow.value)
-            d = self.sim._model.getNodeResult(ID, tka.NodeResults.newDepth.value)
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Qin = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            d = self.sim._model.getNodeResult(id, tka.NodeResults.newDepth.value)
             if d != 0.0:
                 # Calculate new concentration
                 Cnew = np.heaviside((0.1-Qin), 0)*(parameters["C_s"]\
@@ -334,12 +359,12 @@ class waterQuality:
                 Cnew = np.heaviside((0.1-Qin), 0)*parameters["C_s"]\
                 +(Cin-parameters["C_s"])+(1-np.heaviside((0.1-Qin), 0))*Cin
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
         else:
             # Get SWMM parameters
-            C = self.sim._model.getLinkPollut(ID, tka.LinkPollut.reactorQual.value)[pollutant_index]
-            Q = self.sim._model.getLinkResult(ID, tka.LinkResults.newFlow.value)
-            d = self.sim._model.getLinkResult(ID, tka.LinkResults.newDepth.value)
+            C = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            Q = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+            d = self.sim._model.getLinkResult(id, tka.LinkResults.newDepth.value)
             if d != 0.0:
                 # Calculate new concentration
                 Cnew = np.heaviside((0.1-Q), 0)*(parameters["C_s"]\
@@ -349,12 +374,153 @@ class waterQuality:
                 Cnew = np.heaviside((0.1-Q), 0)*parameters["C_s"]\
                 +(C-parameters["C_s"])+(1-np.heaviside((0.1-Q), 0))*C
             # Set new concentration
-            self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+
+
+    # NOTE: might need to merge sewage functions (settling/resus) into single function
+    def _SewageSettling(self, id, pollutant, parameters, element_type):
+        """
+        GRAVITY SETTLING (SWMM Water Quality Manual, 2016)
+        During a quiescent period of time within a storage volume, a fraction
+        of suspended particles will settle out.
+
+        k   = reaction rate constant (SI: m/hr, US: ft/hr)
+        C_s = constant residual concentration that always remains (SI/US: mg/L)
+        """
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+        Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+
+        storage = self.storage._get_storage(element_id=id, pollutant=pollutant)
+
+        frac_settled = 1 # f(Q,d,v,etc.)
+        
+        self.storage._set_storage(
+            element_id=id,
+            pollutant=pollutant,
+            value=storage + frac_settled * Cin)
+
+        Cnew = Cin * (1-frac_settled)
+
+
+        if element_type == ElementType.Nodes:
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+        else:
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+
+
+
+
+
+        """
+        parameters = parameters
+        # Get pollutant index
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+
+        # Get current time
+        current_step = self.sim.current_time
+        # Calculate model dt in seconds
+        dt = (current_step - self.last_timestep).total_seconds()
+
+        if element_type == ElementType.Nodes:
+            # Get SWMM parameters
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Qin = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            d = self.sim._model.getNodeResult(id, tka.NodeResults.newDepth.value)
+            if d != 0.0:
+                # Calculate new concentration
+                Cnew = np.heaviside((0.1-Qin), 0)*(parameters["C_s"]\
+                +(Cin-parameters["C_s"])*np.exp(-parameters["k"]/d*dt/3600))\
+                +(1-np.heaviside((0.1-Qin), 0))*Cin
+            else:
+                Cnew = np.heaviside((0.1-Qin), 0)*parameters["C_s"]\
+                +(Cin-parameters["C_s"])+(1-np.heaviside((0.1-Qin), 0))*Cin
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+        else:
+            # Get SWMM parameters
+            C = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            Q = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+            d = self.sim._model.getLinkResult(id, tka.LinkResults.newDepth.value)
+            if d != 0.0:
+                # Calculate new concentration
+                Cnew = np.heaviside((0.1-Q), 0)*(parameters["C_s"]\
+                +(C-parameters["C_s"])*np.exp(-parameters["k"]/d*dt/3600))\
+                +(1-np.heaviside((0.1-Q), 0))*C
+            else:
+                Cnew = np.heaviside((0.1-Q), 0)*parameters["C_s"]\
+                +(C-parameters["C_s"])+(1-np.heaviside((0.1-Q), 0))*C
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+    """
+
+
+    def _SewageResuspension(self, id, pollutant, parameters, element_type):
+        """
+        Sewage Resuspension (Lederberger et al, 2019)
+        
+        (1) F_sett(t) = M(t) * (A/V(t)) * 𝑣_s
+            𝑣_s is the settling velocity (property of sewage)
+
+        (2) F_resus(t) = M_sed(t) * r_resus(t)
+        (3) r_resus(t) = r_resus_max * Q^n_in(t)/(Q^n_in(t) + Q^n_half(t))
+
+            Q_in is the flow rate into the linear reservoir
+            r_resus_max is the maximum resuspension rate
+            Q_half is the flow rate at which the resuspension rate is half of the maximum is reached
+
+        """
+
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+        Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+
+
+        storage = self.storage._get_storage(element_id=id, pollutant=pollutant)
+
+        frac_resuspended = 0.00 # f(Q,d,v,etc.)
+        
+        self.storage._set_storage(
+            element_id=id,
+            pollutant=pollutant,
+            value=storage * (1 - frac_resuspended))
+
+        Cnew = Cin + frac_resuspended * storage
+
+        if element_type == ElementType.Nodes:
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+        else:
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+
+        """
+        # Get pollutant index
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+
+        if element_type == ElementType.Nodes:
+            # Get SWMM parameter
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            # Calculate new concentration
+            Cnew = (1-parameters["R"])*Cin
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+
+        else:
+            # Get SWMM parameters
+            Q = self.sim._model.getLinkResult(id, 0)
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            
+            # Calculate new concentration
+            Cnew = (1-parameters["R"])*Cin
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+        """
 
 
     """
     Need to add conduit velocity getter to swmm/pyswmm
-    def _Erosion(self, ID, pollutantID, parameters, flag):
+    def _Erosion(self, id, pollutant, parameters, flag):
 
         ENGELUND-HANSEN EROSION (1967)
         Engelund and Hansen (1967) developed a procedure for predicting stage-
@@ -382,10 +548,10 @@ class waterQuality:
             print("Erosion does not work for nodes.")
         else:
             # Get SWMM parameters
-            Cin = self.sim._model.getLinkC2(ID, pollutantID)
-            Q = self.sim._model.getLinkResult(ID, 0)
-            d = self.sim._model.getLinkResult(ID, 1)
-            v = self.sim._model.getConduitVelocity(ID)
+            Cin = self.sim._model.getLinkC2(id, pollutant)
+            Q = self.sim._model.getLinkResult(id, 0)
+            d = self.sim._model.getLinkResult(id, 1)
+            v = self.sim._model.getConduitVelocity(id)
 
             # Erosion calculations for US units
             if self.sim._model.getSimUnit(0) == "US":
@@ -406,7 +572,7 @@ class waterQuality:
                     Cnew = (Qt/Q)*lb_mg*L_ft3   # mg/L
                     Cnew = max(Cin, Cin+Cnew)
                     # Set new concentration
-                    self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+                    self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
             # Erosion calculations for SI units
             else:
@@ -427,7 +593,7 @@ class waterQuality:
                     Cnew = (Qt/Q)*L_m3*kg_mg    # mg/L
                     Cnew = max(Cin, Cin+Cnew)
                     # Set new concentration
-                    self.sim._model.setLinkPollut(ID, pollutantID, Cnew)
+                    self.sim._model.setLinkPollut(id, pollutant, Cnew)
     """
 
 
@@ -445,7 +611,7 @@ class waterQuality:
         return dCdt
 
 
-    def _CSTRSolver(self, index, ID, pollutantID, parameters, element_type):
+    def _CSTRSolver(self, index, id, pollutant, parameters, element_type):
         """
         UNSTEADY CONTINUOUSLY STIRRED TANK REACTOR (CSTR) SOLVER
         CSTR is a common model for a chemical reactor. The behavior of a CSTR
@@ -466,14 +632,14 @@ class waterQuality:
         # Calculate model dt in seconds
         dt = (current_step - self.last_timestep).total_seconds()
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameters
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
-            Qin = self.sim._model.getNodeResult(ID, tka.NodeResults.totalinflow.value)
-            Qout = self.sim._model.getNodeResult(ID, tka.NodeResults.outflow.value)
-            V = self.sim._model.getNodeResult(ID, tka.NodeResults.newVolume.value)
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Qin = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            Qout = self.sim._model.getNodeResult(id, tka.NodeResults.outflow.value)
+            V = self.sim._model.getNodeResult(id, tka.NodeResults.newVolume.value)
 
             # Parameterize solver
             self.solver.set_f_params(Qin, Cin, Qout, V, parameters["k"], parameters["n"])
@@ -485,12 +651,12 @@ class waterQuality:
                 self.solver.set_initial_value(self.solver.y, self.solver.t)
                 self.solver.integrate(self.solver.t+dt)
             # Set new concentration
-            self.sim._model.setNodePollut(ID, pollutantID, self.solver.y[0])
+            self.sim._model.setNodePollut(id, pollutant, self.solver.y[0])
         else:
             print("CSTR does not work for links.")
 
 
-    def _Phosphorus(self, index, ID, pollutantID, parameters, element_type):
+    def _Phosphorus(self, index, id, pollutant, parameters, element_type):
         """
         LI & DAVIS BIORETENTION CELL TOTAL PHOSPHOURS MODEL (2016)
         Li and Davis (2016) developed a dissolved and particulate phosphorus
@@ -507,12 +673,12 @@ class waterQuality:
         parameters = parameters
         t = 0
         # Get pollutant index
-        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutantID)
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
 
         if element_type == ElementType.Nodes:
             # Get SWMM parameters
-            Cin = self.sim._model.getNodePollut(ID, tka.NodePollut.inflowQual.value)[pollutant_index]
-            Qin = self.sim._model.getNodeResult(ID, tka.NodeResults.totalinflow.value)
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            Qin = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
             # Time calculations for phosphorus model
             if Qin >= 0.01:
                 # Get current time
@@ -529,7 +695,7 @@ class waterQuality:
                     *np.exp(parameters["B1"]*t))*(1-(np.exp((-parameters["k"]\
                     *parameters["L"]*parameters["A"]*parameters["E"])/Qin)))
                 # Set new concentration
-                self.sim._model.setNodePollut(ID, pollutantID, Cnew)
+                self.sim._model.setNodePollut(id, pollutant, Cnew)
             else:
                 t = 0
         else:
