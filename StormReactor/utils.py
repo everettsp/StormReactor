@@ -1,7 +1,74 @@
 
 import numpy as np
+from swmmio import Model
 
-def get_surface_area(shape, length, depth, width=None, height=None, diameter=None):
+def get_conduit_volume(model:Model, id:str=None):
+    """
+    get the conduit volume
+
+    :param mdl: swmmio.Model, swmm model object
+    :param id: str, conduit id
+    :return: conduit volume or dict of all conduit volumes
+    :rtype: float or dict
+    """
+    xsections = get_conduit_xsection(model)
+    volumes = {c: xsections[c] * model.inp.conduits.loc[c,"Length"] for c in model.inp.conduits.index}
+
+    if id is not None:
+        return volumes[id]
+    else:
+        return volumes
+
+def get_conduit_xsection(model:Model, id:str=None):
+    """
+    get the conduit cross-sectional area
+
+    :param mdl: swmmio.Model, swmm model object
+    :param id: str, conduit id
+    :return: conduit cross-sectional area or dict of all conduit cross-sectional areas
+    :rtype: float or dict 
+    """
+
+    xsections = {c:_calc_xsection_area(
+        shape=model.inp.xsections.loc[c,"Shape"],
+        diameter=model.inp.xsections.loc[c,"Geom1"],
+        width=model.inp.xsections.loc[c,"Geom1"],
+        height=model.inp.xsections.loc[c,"Geom2"],
+        ) for c in model.inp.conduits.index}
+    
+    if id is not None:
+        return xsections[id]
+    else:
+        return xsections
+    
+
+def _calc_xsection_area(shape:str, width:float=None, height:float=None, diameter:float=None) -> float:
+    """
+    get the cross-sectional area of a conduit
+
+    :param shape: str, shape of the conduit (circular or rectangular)
+    :param width: float, width of the conduit (for rectangular shape)
+    :param height: float, height of the conduit (for rectangular shape)
+    :param diameter: float, diameter of the conduit (for circular shape)
+    :return: cross-sectional area of the conduit
+    :rtype: float
+    """
+
+    if shape.upper() in ["CIRCULAR", "CIRCLE", "CIR"]:
+        if diameter is None:
+            raise ValueError("Diameter must be specified for a circular shape.")
+        return np.pi * (diameter/2)**2
+
+    elif shape in ["RECTANGULAR", "SQUARE", "REC"]:
+        if width is None or height is None:
+            raise ValueError("Width and height must be specified for a rectangular shape.")
+        return width * height
+
+    else:
+        raise ValueError("Invalid shape specified.")
+    
+
+def calc_surface_area(shape:str, length:float, depth:float, width:float=None, height:float=None, diameter:float=None) -> float:
     """
     get the surface area (air interface) of flow in a conduit
 

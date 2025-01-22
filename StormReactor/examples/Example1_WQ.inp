@@ -25,6 +25,7 @@ REPORT_STEP          01:00:00
 WET_STEP             00:15:00
 DRY_STEP             01:00:00
 ROUTING_STEP         0:01:00 
+RULE_STEP            00:00:00
 
 INERTIAL_DAMPING     PARTIAL
 NORMAL_FLOW_LIMITED  BOTH
@@ -36,7 +37,7 @@ MAX_TRIALS           0
 HEAD_TOLERANCE       0
 SYS_FLOW_TOL         5
 LAT_FLOW_TOL         5
-;MINIMUM_STEP         0.5
+MINIMUM_STEP         0.5
 THREADS              1
 
 [EVAPORATION]
@@ -60,7 +61,7 @@ RG1              INTENSITY 1:00     1.0      TIMESERIES TS1
 5                RG1              15               15       50       500      0.01     0                        
 6                RG1              23               12       10       500      0.01     0                        
 7                RG1              19               4        10       500      0.01     0                        
-8                RG1              18               10       10       500      0.01     0                        
+8                RG1              17               10       10       500      0.01     0                        
 
 [SUBAREAS]
 ;;Subcatchment   N-Imperv   N-Perv     S-Imperv   S-Perv     PctZero    RouteTo    PctRouted 
@@ -75,7 +76,7 @@ RG1              INTENSITY 1:00     1.0      TIMESERIES TS1
 8                0.001      0.10       0.05       0.05       25         OUTLET    
 
 [INFILTRATION]
-;;Subcatchment   MaxRate    MinRate    Decay      DryTime    MaxInfil  
+;;Subcatchment   Param1     Param2     Param3     Param4     Param5    
 ;;-------------- ---------- ---------- ---------- ---------- ----------
 1                0.35       0.25       4.14       0.50       0         
 2                0.7        0.3        4.14       0.50       0         
@@ -148,11 +149,6 @@ RG1              INTENSITY 1:00     1.0      TIMESERIES TS1
 TSS              MG/L   0.0        0.0        0          0.0        NO         *                0.0        0          0         
 Lead             UG/L   0.0        0.0        0          0.0        NO         TSS              0.2        0          0         
 
-[TREATMENT]
-;;Node           Pollutant        Function  
-;;-------------- ---------------- ----------
-17               TSS              C=5.0
-
 [LANDUSES]
 ;;               Sweeping   Fraction   Last      
 ;;Name           Interval   Available  Swept     
@@ -194,6 +190,11 @@ Residential      Lead             EMC        0          0          0          0
 Undeveloped      TSS              EXP        0.1        0.7        0          0         
 Undeveloped      Lead             EMC        0          0          0          0         
 
+[TREATMENT]
+;;Node           Pollutant        Function  
+;;-------------- ---------------- ----------
+17               TSS              C=5.0
+
 [TIMESERIES]
 ;;Name           Date       Time       Value     
 ;;-------------- ---------- ---------- ----------
@@ -212,8 +213,6 @@ TS1                         30:00      0.0
 
 [REPORT]
 ;;Reporting Options
-INPUT      NO
-CONTROLS   NO
 SUBCATCHMENTS ALL
 NODES ALL
 LINKS ALL
@@ -221,7 +220,7 @@ LINKS ALL
 [TAGS]
 
 [MAP]
-DIMENSIONS 0.000 0.000 10000.000 10000.000
+DIMENSIONS -238.949 -154.736 10575.789 10196.847
 Units      None
 
 [COORDINATES]

@@ -23,5 +23,5 @@ REQUIRED_PARAMETERS["ConcDependRemoval"] = ["BC","R_l","R_u"]
 REQUIRED_PARAMETERS["NthOrderReaction"] = ["k","n"]
 REQUIRED_PARAMETERS["kCModel"] = ["k","C_s"]
 REQUIRED_PARAMETERS["GravitySettling"] = ["k","C_s"]
-REQUIRED_PARAMETERS["SewageFlux"] = ["Qhalf","v_sett","Smax"]
+REQUIRED_PARAMETERS["SewageFlux"] = ["Qhalf","v_sett","Smax","Resus_max","n"]
 

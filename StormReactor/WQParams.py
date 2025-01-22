@@ -14,6 +14,7 @@ class WQParams(dict):
         :type C: float
         """
         self["C"] = C
+        return self
 
     def CoRemoval(self, R1: float, R2: float) -> None:
         """
@@ -27,6 +28,7 @@ class WQParams(dict):
         """
         self["R1"] = R1
         self["R2"] = R2
+        return self
 
     def ConcDependRemoval(self, BC: float, R_l: float, R_u: float) -> None:
         """
@@ -42,6 +44,7 @@ class WQParams(dict):
         self["BC"] = BC
         self["R_l"] = R_l
         self["R_u"] = R_u
+        return self
 
     def NthOrderReaction(self, k: float, n: float) -> None:
         """
@@ -56,6 +59,7 @@ class WQParams(dict):
         """
         self["k"] = k
         self["n"] = n
+        return self
 
     def kCModel(self, k: float, C_s: float) -> None:
         """
@@ -70,6 +74,7 @@ class WQParams(dict):
 
         self["k"] = k
         self["C_s"] = C_s
+        return self
 
     def GravitySettling(self, k: float, C_s: float) -> None:
         """
@@ -84,8 +89,9 @@ class WQParams(dict):
 
         self["k"] = k
         self["C_s"] = C_s
+        return self
 
-    def SewageFlux(self, Qhalf: float, v_sett: float, Smax: float) -> None:
+    def SewageFlux(self, Qhalf: float, v_sett: float, Smax: float, Resus_max: float, n: float=2) -> None:
         """
         Sets the sewage flux parameters.
         :param Qhalf: The flow rate at half saturation (m^3/s).
@@ -94,9 +100,16 @@ class WQParams(dict):
         :type v_sett: float
         :param Smax: The maximum storage (kg).
         :type Smax: float
+        :param Resus_max: The maximum resuspension rate (kg/s).
+        :type Resus_max: float
+        :param n: Resuspension curve steepness.
+        :type n: float
         :return: None
         """
 
         self["Qhalf"] = Qhalf
         self["v_sett"] = v_sett
         self["Smax"] = Smax
+        self["Resus_max"] = Resus_max
+        self["n"] = n
+        return self

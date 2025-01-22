@@ -375,77 +375,76 @@ class waterQuality:
             # Set new concentration
             self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
-
-    # NOTE: might need to merge sewage functions (settling/resus) into single function
     def _SewageFlux(self, id, pollutant, parameters, element_type):
         """
-        GRAVITY SETTLING (SWMM Water Quality Manual, 2016)
-        During a quiescent period of time within a storage volume, a fraction
-        of suspended particles will settle out.
+        Sewage settling and resuspension model (Lederberger et al, 2019)
 
-        k   = reaction rate constant (SI: m/hr, US: ft/hr)
-        C_s = constant residual concentration that always remains (SI/US: mg/L)
         """
 
         if element_type == ElementType.Nodes:
             raise NotImplementedError("SewageSettling does not work for nodes.")
 
-        
-        # TODO: add these as WQ parameters
-        Smax = 10 # max storage
-        vsett = 0.1 # particle settling velocity
-        rresus_max = 0.1 # maximum resuspension rate
-        n = 2 # exponent indicator of the steepness of change
-        Qhalf = 0.5
-
         pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
-        Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
-        A = self.sim._model.getLinkResult(id, tka.LinkResults.surfArea2.value)
+        Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index] # [mg/L]
+
+
+        d = self.sim._model.getLinkResult(id, tka.LinkResults.newDepth.value)
         V = self.sim._model.getLinkResult(id, tka.LinkResults.newVolume.value)
+
+        Qin = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value) # [m^3/s]
+
         Sin = self.storage._get_storage(element_id=id, pollutant=pollutant)
         
-        Msewer = Cin * V
+        current_step = self.sim.current_time
+        dt = (current_step - self.last_timestep).total_seconds() #[seconds]
 
+        # NOTE: I'm replacing A/V(t) with 1/d(t)
+        # in lerderberger, a rectangular linear reservoir is used, which has a constant A
+        # when calculating settling in conduits, you should technically use A(t)/V(t), since the surface of the area changes with depth
+        # also, you should use an effective depth, since the depth near the walls of the pipe will be lower
+        # in the absence of a better method, I'm using 1/d(t) as a proxy for A(t)/V(t), which is the depth to invert
+        
+        Msewer = 0
+        
         if V == 0:
             Fsett = 0
         else:
-            Fsett = Msewer * (A/V) * vsett
+            Msewer = Cin * V # [mg/L * m^3 = mg]
+            Fsett = Msewer * (1/d) * parameters["v_sett"] # [mg/s]
 
-        Qin = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+        # if the settling mass is greater than the total mass, then the settling mass is set to the total mass
+        Msett = Fsett * dt # [mg]
+        if Msett > Msewer:
+            Msett = Msewer
+
 
         # Sin is equal to 'Particle mass settled in the sediment compartment' (Lederberger et al, 2019)
-        rresus = rresus_max * (Qin**n)/(Qin**n + Qhalf**n)
-        Fresus = Sin * rresus
-        
-        Fnet = Fsett - Fresus
+        rresus = parameters["Resus_max"] * (Qin**parameters["n"])/(Qin**parameters["n"] + parameters["Qhalf"]**parameters["n"]) # [1/s] 
+        Fresus = Sin * rresus # [mg/s]
+        Mresus = Fresus * dt # [mg]
 
-        # resuspension
-        if Fnet > 0:
-            # if Fnet is greater than the storage, then the storage is emptied, Fnet is set to the storage value
-            if Fnet > Sin:
-                Fnet = Sin
-                Snew = 0
 
-            # add Fnet to the outflow concentration
-            Cnew = Fnet + Cin
+        if Mresus > Sin:
+            Mresus = Sin
 
-        # settling
-        elif Fnet < 0:
-            # calculate new storage (existing + settled)
-            Snew = Sin - Fnet
+        # negative Mnet means settling > resuspension
+        Mnet = Mresus - Msett # [mg]
 
-            # if new storage is greater than the max storage, then the storage is set to the max storage, Fnet is set to the difference
-            if Snew > Smax:
-                Fnet = Sin - Smax
-                Snew = Smax
 
-                # add the difference (which couldn't settle out) to the outflow concentration
-                Cnew = Cin - Fnet
-
-        else: # if F_net = 0, no change
+        # adjust the inflow concentration
+        # if no flow, make no changes
+        if V != 0:
+            Cnew = Mnet/V + Cin
+            Snew = Sin - Mnet
+        else:
             Cnew = Cin
             Snew = Sin
-
+        
+        # if the maximum storage is exceeded, the difference is added to the outflow concentration
+        if Snew > parameters["Smax"]:
+            Cnew =+ (Snew - parameters["Smax"])/V
+            Snew = parameters["Smax"]
+                    
         self.storage._set_storage(element_id=id,pollutant=pollutant,value=Snew)
 
         if element_type == ElementType.Nodes:
