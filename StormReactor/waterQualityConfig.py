@@ -1,7 +1,6 @@
 
 import warnings
 from StormReactor._standardization import _standardize_method, _standardize_parameters, _standardize_parameters, _standardize_method, _standardize_element, _standardize_element_type, _standardize_pollutants
-from StormReactor.defs.ElementType import ElementType
 from swmmio import Model
 #from StormReactor.WQParams import WQParams
 
