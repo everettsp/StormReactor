@@ -18,7 +18,6 @@ def _standardize_parameters(parameters, method:str):
             warnings.warn(f"Parameter {param} is not a valid parameter for {method} method and will be ignored.")
 
 
-
 def _standardize_element(element_id, model):
     all_elements = list(model.nodes().index) + list(model.links().index)
     if element_id not in all_elements:
@@ -39,8 +38,4 @@ def _standardize_pollutants(pollutant, model):
     all_pollutants = list(model.inp.pollutants.index)
     if pollutant not in all_pollutants:
         raise ValueError(f"Pollutant {pollutant} not found in model")
-    
-def _standardize_methods(method):
-    if method not in METHODS:
-        raise ValueError(f"Method {method} not found in methods list")
     
