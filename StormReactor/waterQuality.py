@@ -5,7 +5,7 @@ from scipy.integrate import ode
 
 import pandas as pd
 
-from StormReactor import WQConfig
+from StormReactor import waterQualityConfig
 
 from StormReactor._standardization import _standardize_method, _standardize_parameters
 
