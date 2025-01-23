@@ -11,10 +11,7 @@ METHODS = ["EventMeanConc",
            "SewageFlux",
            ]
 
-
 #TODO: might be cleaner to switch these this to a class
-
-
 
 REQUIRED_PARAMETERS = {}
 REQUIRED_PARAMETERS["EventMeanConc"] = ["C"]

@@ -4,5 +4,3 @@ from StormReactor.waterQuality import waterQuality, WQStorage
 from StormReactor.defs import ElementType
 
 __version__ = "1.4.0"
-
-__all__ = ["waterQuality", "waterQualityParams", "waterQualityConfig", "defs", "examples","tests"]

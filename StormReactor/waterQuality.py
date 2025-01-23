@@ -5,7 +5,8 @@ from scipy.integrate import ode
 
 import pandas as pd
 
-from StormReactor import waterQualityConfig
+from StormReactor.waterQualityStorage import WQStorage
+from StormReactor.waterQualityConfig import WQConfig
 from StormReactor._standardization import _standardize_method, _standardize_parameters
 
 import warnings
@@ -19,20 +20,6 @@ class PySWMMStepAdvanceNotSupported(Exception):
     def __init__(self):
         self.message = "PySWMM sim.step_advance() feature is currently unsuppprted."
         super().__init__(self.message)
-
-class WQStorage:
-    def __init__(self, element_ids, pollutants, flag:int=0):
-        self.element_ids = element_ids
-        self.pollutants = pollutants
-        self.values = np.zeros(shape=[len(element_ids),len(pollutants)])
-        self.flag = flag # 0 for nodes, 1 for links
-        self.df = pd.DataFrame(self.values, index=self.element_ids, columns=self.pollutants)
-
-    def _get_storage(self, element_id, pollutant):
-        return self.df.loc[element_id, pollutant]
-
-    def _set_storage(self, element_id, pollutant, value):
-        self.df.at[element_id, pollutant] = value
 
 class waterQuality:
     """
@@ -123,7 +110,7 @@ class waterQuality:
             raise(PySWMMStepAdvanceNotSupported)
 
         # Parse all the elements and their parameters in the config dictionary
-        for element_id, element_info in self.config.items():
+        for element_id, element_info in self.config:
             attribute = self.config[element_id]['method']
             element_type = self.config[element_id]['type']
             if element_type == "node":
