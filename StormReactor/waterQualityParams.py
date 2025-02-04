@@ -13,6 +13,7 @@ class WQParams(dict):
         :param C: float, event mean concentration
         :type C: float
         """
+        self["method"] = "EventMeanConc"
         self["C"] = C
         return self
 
@@ -26,6 +27,7 @@ class WQParams(dict):
         :type R2: float
         
         """
+        self["method"] = "CoRemoval"
         self["R1"] = R1
         self["R2"] = R2
         return self
@@ -41,6 +43,8 @@ class WQParams(dict):
         :param R_u: float, removal rate upper
         :type R_u: float
         """
+
+        self["method"] = "ConcDependRemoval"
         self["BC"] = BC
         self["R_l"] = R_l
         self["R_u"] = R_u
@@ -57,6 +61,8 @@ class WQParams(dict):
         :return: None
         :rtype: None
         """
+
+        self["method"] = "NthOrderReaction"
         self["k"] = k
         self["n"] = n
         return self
@@ -72,6 +78,7 @@ class WQParams(dict):
         :rtype: None
         """
 
+        self["method"] = "kCModel"
         self["k"] = k
         self["C_s"] = C_s
         return self
@@ -87,6 +94,7 @@ class WQParams(dict):
         :rtype: None
         """
 
+        self["method"] = "GravitySettling"
         self["k"] = k
         self["C_s"] = C_s
         return self
@@ -107,6 +115,7 @@ class WQParams(dict):
         :return: None
         """
 
+        self["method"] = "SewageFlux"
         self["Qhalf"] = Qhalf
         self["v_sett"] = v_sett
         self["Smax"] = Smax

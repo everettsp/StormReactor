@@ -5,7 +5,7 @@ from swmmio import Model
 #from StormReactor.WQParams import WQParams
 
 class WQConfig:
-    def __init__(self, element_id:str, element_type:str, pollutant:str, method:str, parameters:dict, model:Model=None):
+    def __init__(self, element_id:str, element_type:str, pollutant:str, parameters:dict, model:Model=None):
         """
         configuration class for water quality class
 
@@ -15,8 +15,6 @@ class WQConfig:
         :type element_type: str
         :param pollutant: str, pollutant name
         :type pollutant: str
-        :param method: str, method name
-        :type method: str
         :param parameters: dict, parameters for the method
         :type parameters: dict
         :param model: Model, swmmio model
@@ -26,9 +24,9 @@ class WQConfig:
         self.element_id = element_id
         self.element_type = element_type
         self.pollutant = pollutant
-        self.method = method
         self.parameters = parameters
-        
+        self.method = parameters["method"]
+
         self._standardize_element_type = _standardize_element_type
         self._standardize_element = _standardize_element
         self._standardize_pollutants = _standardize_pollutants

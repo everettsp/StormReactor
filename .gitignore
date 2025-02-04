@@ -7,6 +7,9 @@
 # virtual environment
 venv/
 
+# notebooks
+notebooks/
+
 # Python special dirs and files
 *.egg-info
 *.cache/

@@ -416,7 +416,6 @@ class waterQuality:
         # negative Mnet means settling > resuspension
         Mnet = Mresus - Msett # [mg]
 
-
         # adjust the inflow concentration
         # if no flow, make no changes
         if V != 0:
@@ -426,6 +425,9 @@ class waterQuality:
             Cnew = Cin
             Snew = Sin
         
+        if Cnew < 0:
+            Cnew = 0
+
         # if the maximum storage is exceeded, the difference is added to the outflow concentration
         if Snew > parameters["Smax"]:
             Cnew =+ (Snew - parameters["Smax"])/V

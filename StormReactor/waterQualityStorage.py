@@ -13,4 +13,4 @@ class WQStorage:
         return self.df.loc[element_id, pollutant]
 
     def _set_storage(self, element_id, pollutant, value):
-        self.df.at[element_id, pollutant] = value
+        self.df.loc[element_id, pollutant] = value
