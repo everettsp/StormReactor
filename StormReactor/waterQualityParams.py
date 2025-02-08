@@ -5,6 +5,7 @@
 class WQParams(dict):
     def __init__(self) -> None:
         super().__init__()
+        self.clear()
 
     def EventMeanConc(self, C: float) -> None:
         """
@@ -13,6 +14,7 @@ class WQParams(dict):
         :param C: float, event mean concentration
         :type C: float
         """
+        self.clear()
         self["method"] = "EventMeanConc"
         self["C"] = C
         return self
@@ -27,6 +29,7 @@ class WQParams(dict):
         :type R2: float
         
         """
+        self.clear()
         self["method"] = "CoRemoval"
         self["R1"] = R1
         self["R2"] = R2
@@ -43,7 +46,7 @@ class WQParams(dict):
         :param R_u: float, removal rate upper
         :type R_u: float
         """
-
+        self.clear()
         self["method"] = "ConcDependRemoval"
         self["BC"] = BC
         self["R_l"] = R_l
@@ -61,7 +64,7 @@ class WQParams(dict):
         :return: None
         :rtype: None
         """
-
+        self.clear()
         self["method"] = "NthOrderReaction"
         self["k"] = k
         self["n"] = n
@@ -77,7 +80,7 @@ class WQParams(dict):
         :return: None
         :rtype: None
         """
-
+        self.clear()
         self["method"] = "kCModel"
         self["k"] = k
         self["C_s"] = C_s
@@ -93,7 +96,7 @@ class WQParams(dict):
         :return: None
         :rtype: None
         """
-
+        self.clear()
         self["method"] = "GravitySettling"
         self["k"] = k
         self["C_s"] = C_s
@@ -114,11 +117,37 @@ class WQParams(dict):
         :type n: float
         :return: None
         """
-
+        self.clear()
         self["method"] = "SewageFlux"
         self["Qhalf"] = Qhalf
         self["v_sett"] = v_sett
         self["Smax"] = Smax
         self["Resus_max"] = Resus_max
+        self["n"] = n
+        return self
+    
+    def ViralDecay(self, copollutant:str, k:float, n:int) -> None:
+        """
+        Sets the decay parameters.
+        :param k: The decay rate constant.
+        :type k: float
+        :return: None
+        """
+        self.clear()
+        self["method"] = "ViralDecay"
+
+
+        """
+        Sets the parameters for an Nth order reaction.
+
+        :param k: The reaction rate constant.
+        :type k: float
+        :param n: The reaction order.
+        :type n: float
+        :return: None
+        :rtype: None
+        """
+        self["copollutant"] = copollutant
+        self["k"] = k
         self["n"] = n
         return self

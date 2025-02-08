@@ -79,6 +79,7 @@ class waterQuality:
             "CSTR": self._CSTRSolver,
             "Phosphorus": self._Phosphorus,
             "SewageFlux": self._SewageFlux,
+            "ViralDecay": self._ViralDecay
             }
 
 
@@ -364,7 +365,6 @@ class waterQuality:
     def _SewageFlux(self, id, pollutant, parameters, element_type):
         """
         Sewage settling and resuspension model (Lederberger et al, 2019)
-
         """
 
         if element_type == ElementType.Nodes:
@@ -416,11 +416,42 @@ class waterQuality:
         # negative Mnet means settling > resuspension
         Mnet = Mresus - Msett # [mg]
 
+        
+        if Mnet < 0: # settling
+            #if -Mnet > Sin:
+            #    Meff = -Sin
+
+            if (Sin - Mnet) >= parameters["Smax"]:
+                remaining_storage = parameters["Smax"] - Sin
+                Meff = -remaining_storage
+            else:
+                Meff = Mnet
+
+        elif Mnet > 0: # resuspension
+            if Mnet > Msewer:
+                Meff = Msewer
+            else:
+                Meff = Mnet
+        else:
+            Meff = 0
+
+
+        Snew = Sin - Meff
+
+
+        if V != 0:
+            Cnew = (Msewer + Meff)/V
+        else:
+            Cnew = Cin
+
+
+        """
         # adjust the inflow concentration
         # if no flow, make no changes
         if V != 0:
             Cnew = Mnet/V + Cin
-            Snew = Sin - Mnet
+            Snew = Sin - Meff
+
         else:
             Cnew = Cin
             Snew = Sin
@@ -434,6 +465,15 @@ class waterQuality:
             Snew = parameters["Smax"]
                     
         self.storage._set_storage(element_id=id,pollutant=pollutant,value=Snew)
+        
+        # positive flux - resuspension
+        # negative flux - settling
+        #flux = Cin - Cnew
+        self.storage._set_flux(element_id=id,pollutant=pollutant,value=(Cnew - Cin)*V)
+        """
+
+        self.storage._set_flux(element_id=id,pollutant=pollutant,value=(Cnew - Cin)*V)
+        self.storage._set_storage(element_id=id,pollutant=pollutant,value=Snew)
 
         if element_type == ElementType.Nodes:
             # Set new concentration
@@ -443,7 +483,98 @@ class waterQuality:
             self.sim._model.setLinkPollut(id, pollutant, Cnew)
 
 
+    def _ViralDecay(self, id, pollutant, parameters, element_type):
+        """
+        Sewage settling and resuspension model (Lederberger et al, 2019)
+        """
 
+
+        # get the depth and volume of the conduit
+        d = self.sim._model.getLinkResult(id, tka.LinkResults.newDepth.value)
+        V = self.sim._model.getLinkResult(id, tka.LinkResults.newVolume.value)
+
+        # Get pollutant index
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+        Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index] # [mg/L]
+
+        # Get current time
+        current_step = self.sim.current_time
+        # Calculate model dt in seconds
+        dt = (current_step - self.last_timestep).total_seconds()
+
+        # get the copollutant concentration (this is grapped prior to the settling/resuspension, since the API seems to update things at each timestep)
+        copollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, parameters["copollutant"])
+        CPin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[copollutant_index] # [mg/L]
+
+        # get the copollutant flux (net sett/resus [mg])
+        CPflux = self.storage._get_flux(element_id=id, pollutant=parameters["copollutant"])
+    
+
+        if V != 0:
+            CPnew = CPin + CPflux/V
+        else:
+            CPnew = CPin
+            
+        if CPin != 0:
+            CPchange = (CPnew - CPin)/CPin
+        else:
+            CPchange = 0
+
+        # get the copollutant (tss) storage [mg]
+        CP_Snew = self.storage._get_storage(element_id=id, pollutant=parameters["copollutant"])
+
+
+        # get the viral flux [mg * copies/mg]
+        Mflux = CPflux * Cin # [copies]
+
+        # get the viral load in storage [copies]
+        Sin = self.storage._get_storage(element_id=id, pollutant=pollutant)
+        
+        # calculate the new viral load in storage [copies]
+        Snew = Sin - Cin * CPchange
+
+        # calculate the viral concentration in storage [copies/mg]
+        if CP_Snew != 0:
+            Sconc = Snew / CP_Snew
+        else:
+            Sconc = 0
+
+        # apply decay to storage [copies/mg]
+        Sdecay = Sconc - parameters["k"] * (Sconc ** parameters["n"]) * dt
+        #Sdecay = Snew
+
+
+        Sout = Sdecay * CP_Snew
+        #
+        if Sdecay < 0:
+            Sdecay = 0
+
+        # set the new storage (after applying decay)
+        self.storage._set_storage(element_id=id,pollutant=pollutant,value=Sout)
+
+
+
+
+        # get the viral conc in
+        
+        
+        Cnew = Cin + CPchange * Cin
+
+
+        # apply decay to viral concentration out [copies/mg]
+        Cdecay = Cnew - (parameters["k"]*(Cnew**(parameters["n"])*dt))
+        
+        print(Cdecay)
+        if Cdecay < 0:
+            Cdecay = 0
+            warnings.warn("Viral concentration has decayed to zero. Consider increasing the decay rate or changing the decay model.")
+
+        if element_type == ElementType.Nodes:
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cdecay)
+        else:
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cdecay)
     """
     Need to add conduit velocity getter to swmm/pyswmm
     def _Erosion(self, id, pollutant, parameters, flag):

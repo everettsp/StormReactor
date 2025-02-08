@@ -7,10 +7,19 @@ class WQStorage:
         self.pollutants = pollutants
         self.values = np.zeros(shape=[len(element_ids),len(pollutants)])
         self.flag = flag # 0 for nodes, 1 for links
-        self.df = pd.DataFrame(self.values, index=self.element_ids, columns=self.pollutants)
+
+        self.df = pd.DataFrame(self.values, index=self.element_ids, columns=self.pollutants).copy()
+
+        self.fluxes = pd.DataFrame(self.values, index=self.element_ids, columns=self.pollutants).copy()
 
     def _get_storage(self, element_id, pollutant):
         return self.df.loc[element_id, pollutant]
 
     def _set_storage(self, element_id, pollutant, value):
         self.df.loc[element_id, pollutant] = value
+
+    def _get_flux(self, element_id, pollutant):
+        return self.fluxes.loc[element_id, pollutant]
+
+    def _set_flux(self, element_id, pollutant, value):
+        self.fluxes.loc[element_id, pollutant] = value
