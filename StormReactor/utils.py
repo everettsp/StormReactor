@@ -1,6 +1,8 @@
 
 import numpy as np
 from swmmio import Model
+from datetime import datetime
+
 
 def get_conduit_volume(model:Model, id:str=None):
     """
@@ -112,3 +114,71 @@ def calc_surface_area(shape:str, length:float, depth:float, width:float=None, he
         raise ValueError("Invalid shape specified.")
     
     return length * fill_width
+
+
+
+# load time patterns
+from datetime import datetime
+def get_patterns_as_df(mdl):
+    """
+    retrieve time patterns from a swmm model and return them as a time indexed pandas dataframe
+
+    :param mdl: SWMM Model
+    :type mdl: swmmio.Model
+    :return: time indexed pandas dataframe
+    :rtype: pandas.DataFrame   
+    
+    """
+    time_array = [datetime.strptime(f"{hour}:00", "%H:%M").time() for hour in range(24)]
+    
+    patterns_df = mdl.inp.patterns.T
+
+    patterns_df = patterns_df.drop(index=['Type'])
+    if len(patterns_df) != 24:
+        raise NotImplementedError("Time patterns must be defined for all 24 hours of the day")
+    
+    patterns_df.index = time_array
+    return patterns_df
+
+def is_weekend(ct: datetime) -> bool:
+    """
+    determine if a given datetime is a weekend
+
+    :param ct: datetime, current datetime
+    :type ct: datetime
+    :return: True if weekend, False if not
+    :rtype: bool
+    """
+
+    is_weekend = ct.weekday() == 5 or ct.weekday() == 6
+    return is_weekend
+
+
+from StormReactor.WaterQualityCaches import _CreateDryWeatherLoadingCache
+
+def get_dwf_load(element:str, pollutant:str, datestamp:datetime, dt:int, cache:dict=None):
+    # determine which pattern to use
+    if is_weekend(datestamp):
+        pattern_dict = cache["weekend_pattern_dict"]
+    else:
+        pattern_dict = cache["weekday_pattern_dict"]
+
+    patterns = cache["patterns"]
+
+    # get the pattern at the node
+    pattern_name = pattern_dict[element]
+
+    # get the dwf rate corresponding to the pattern and time of day
+    average_value = cache["dwf"].loc[element, "AverageValue"]
+    dwf_rate = average_value * patterns.loc[patterns.index.asof(datestamp.time()), pattern_name]
+
+
+    
+
+
+    # calculate dwf volume [m^3], concentration [mg/L], and load [mg]
+    dwf_volume = dwf_rate * dt
+    dwf_conc = cache["pollutants"].loc[pollutant, "DWFConcen"]
+    dwf_load = dwf_volume * dwf_conc
+
+    return dwf_load

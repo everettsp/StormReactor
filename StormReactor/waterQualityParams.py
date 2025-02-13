@@ -135,19 +135,29 @@ class WQParams(dict):
         """
         self.clear()
         self["method"] = "ViralDecay"
-
-
-        """
-        Sets the parameters for an Nth order reaction.
-
-        :param k: The reaction rate constant.
-        :type k: float
-        :param n: The reaction order.
-        :type n: float
-        :return: None
-        :rtype: None
-        """
         self["copollutant"] = copollutant
         self["k"] = k
         self["n"] = n
         return self
+    
+    def ConstantWasteLoad(self, L:float) -> None:
+        """
+        Sets the parameters for a constant concentration.
+
+        :param L: float, constant load
+        :type L: float
+        """
+        self.clear()
+        self["method"] = "ConstantWasteLoad"
+        self["L"] = L
+        return self
+    
+    def DryWeatherLoading(self, multiplier:float) -> None:
+        """
+        No parameters required for dry-weather loading (retrieved from SWMM model).
+        """
+        self.clear()
+        self["method"] = "DryWeatherLoading"
+        self["multiplier"] = multiplier
+        return self
+    

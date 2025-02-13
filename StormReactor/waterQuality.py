@@ -9,8 +9,13 @@ from StormReactor.waterQualityStorage import WQStorage
 from StormReactor.waterQualityConfig import WQConfig
 from StormReactor._standardization import _standardize_method, _standardize_parameters
 
+from swmmio import Model
+
 import warnings
 from StormReactor.defs.ElementType import ElementType
+from StormReactor.utils import get_dwf_load, get_patterns_as_df
+from StormReactor.WaterQualityCaches import _CreateDryWeatherLoadingCache
+
 
 # List of Exception Classes
 class PySWMMStepAdvanceNotSupported(Exception):
@@ -61,6 +66,10 @@ class waterQuality:
         self.start_time = self.sim.start_time
         self.last_timestep = self.start_time
         self.solver = ode(self._CSTR_tank)
+        self.model = Model(self.sim._model.inpfile)
+
+        # Create cache for water quality methods
+        self._CreateCache()
 
         self.storage = WQStorage(
             element_ids = np.unique([c.element_id for c in self.config]),
@@ -79,7 +88,9 @@ class waterQuality:
             "CSTR": self._CSTRSolver,
             "Phosphorus": self._Phosphorus,
             "SewageFlux": self._SewageFlux,
-            "ViralDecay": self._ViralDecay
+            "ViralDecay": self._ViralDecay,
+            "ConstantWasteLoad": self._ConstantWasteLoad,
+            "DryWeatherLoading": self._DryWeatherLoading,
             }
 
 
@@ -123,6 +134,121 @@ class waterQuality:
 
         #Update timestep after water quality methods are completed
         self.last_timestep = self.sim.current_time
+
+    def _CreateCache(self):
+        """
+        Create a cache for water quality related data so that it doesn't have to be recalculated at every simulation step and element. Method dependant, so cache is only generated for specified methods.
+        """
+
+        self.cache = {}
+        
+        # get the unique WaterQuality methods
+        methods = np.unique([cfg.method for cfg in self.config])
+
+        if "DryWeatherLoading" in methods:
+            DryWeatherLoadingCache = _CreateDryWeatherLoadingCache(self.model)
+            self.cache.update(DryWeatherLoadingCache)
+
+    def _ConstantWasteLoad(self, id, pollutant, parameters, element_type):
+
+        """
+        Since the PySWMM API can only edit the pollutant concentration at nodes/links, not the DWF concentration, we need to calculate the new concentration based on the DWF load. 
+
+        This is done by calculating the existing load [mg], adding the new load [mg], and dividing by the new flow [m^3/s] to get the new concentration [mg/L].
+        """
+
+        _standardize_parameters(parameters, method="ConstantWasteLoad")
+
+
+        # Get current time
+        current_step = self.sim.current_time
+        # Calculate model dt in seconds
+        dt = (current_step - self.last_timestep).total_seconds()
+
+
+
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+
+        if element_type == ElementType.Nodes:
+            # Get SWMM parameter
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            V = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            # Set new concentration
+        else:
+            # Get SWMM parameter
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            V = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+
+
+
+        Lin = Cin * V
+        Lnew = Lin + parameters["L"]
+
+        if V != 0:
+            Cnew = Lnew / V
+        else: 
+            Cnew = Cin
+
+        if element_type == ElementType.Nodes:
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+        else:
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+
+
+    def _DryWeatherLoading(self, id, pollutant, parameters, element_type):
+
+        """
+        Apply dry-weather loading, permitting the user to set spatially-heterogenous pollutant loading rates.
+
+        Since the PySWMM API doesn't allow for the direct editing of DWF inflows or concentrations, we need to lookup the DWF loading from the model inp file and apply them at the nodes
+        """
+
+        _standardize_parameters(parameters, method="DryWeatherLoading")
+
+
+        # Get current time
+        current_step = self.sim.current_time
+        # Calculate model dt in seconds
+        dt = (current_step - self.last_timestep).total_seconds()
+
+
+
+        pollutant_index = self.sim._model.getObjectIDIndex(tka.ObjectType.POLLUT, pollutant)
+
+        if element_type == ElementType.Nodes:
+            # Get SWMM parameter
+            Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
+            V = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            # Set new concentration
+        else:
+            # Get SWMM parameter
+            Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
+            V = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+
+
+
+        Ldwf = get_dwf_load(element=id, pollutant=pollutant, datestamp=current_step, dt=dt, cache=self.cache)
+
+
+
+        Lin = Cin * V
+        Lnew = Lin + Ldwf
+
+        if V != 0:
+            Cnew = Lnew / V
+        else: 
+            Cnew = Cin
+
+        if element_type == ElementType.Nodes:
+            # Set new concentration
+            self.sim._model.setNodePollut(id, pollutant, Cnew)
+        else:
+            # Set new concentration
+            self.sim._model.setLinkPollut(id, pollutant, Cnew)
+
+
 
 
     def _EventMeanConc(self, id, pollutant, parameters, element_type):
@@ -435,9 +561,7 @@ class waterQuality:
         else:
             Meff = 0
 
-
         Snew = Sin - Meff
-
 
         if V != 0:
             Cnew = (Msewer + Meff)/V
@@ -552,19 +676,12 @@ class waterQuality:
         # set the new storage (after applying decay)
         self.storage._set_storage(element_id=id,pollutant=pollutant,value=Sout)
 
-
-
-
         # get the viral conc in
-        
-        
         Cnew = Cin + CPchange * Cin
-
 
         # apply decay to viral concentration out [copies/mg]
         Cdecay = Cnew - (parameters["k"]*(Cnew**(parameters["n"])*dt))
         
-        print(Cdecay)
         if Cdecay < 0:
             Cdecay = 0
             warnings.warn("Viral concentration has decayed to zero. Consider increasing the decay rate or changing the decay model.")
