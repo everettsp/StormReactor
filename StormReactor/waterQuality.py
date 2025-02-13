@@ -172,15 +172,15 @@ class waterQuality:
         if element_type == ElementType.Nodes:
             # Get SWMM parameter
             Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
-            V = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            Q = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
             # Set new concentration
         else:
             # Get SWMM parameter
             Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
-            V = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
+            Q = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
 
 
-
+        V = Q * dt
         Lin = Cin * V
         Lnew = Lin + parameters["L"]
 
@@ -220,21 +220,18 @@ class waterQuality:
         if element_type == ElementType.Nodes:
             # Get SWMM parameter
             Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
-            V = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
+            Q = self.sim._model.getNodeResult(id, tka.NodeResults.totalinflow.value)
             # Set new concentration
         else:
             # Get SWMM parameter
             Cin = self.sim._model.getLinkPollut(id, tka.LinkPollut.reactorQual.value)[pollutant_index]
-            V = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
-
-
+            Q = self.sim._model.getLinkResult(id, tka.LinkResults.newFlow.value)
 
         Ldwf = get_dwf_load(element=id, pollutant=pollutant, datestamp=current_step, dt=dt, cache=self.cache)
 
-
-
+        V = Q * dt
         Lin = Cin * V
-        Lnew = Lin + Ldwf
+        Lnew = Lin + - Ldwf + Ldwf * parameters["multiplier"]
 
         if V != 0:
             Cnew = Lnew / V
