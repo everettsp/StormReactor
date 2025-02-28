@@ -1,5 +1,6 @@
 # Import class from package
 from StormReactor.waterQualityConfig import WQConfig
+from StormReactor.waterQualityParams import WQParams
 from StormReactor.waterQuality import waterQuality, WQStorage
 from StormReactor.defs import ElementType
 

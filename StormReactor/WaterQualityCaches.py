@@ -1,5 +1,6 @@
 from StormReactor.utils import get_patterns_as_df
 from swmmio import Model
+from StormReactor.waterQualityParams import load_custom_daily_profile
 
 
 def _CreateDryWeatherLoadingCache(model:Model):
@@ -13,3 +14,10 @@ def _CreateDryWeatherLoadingCache(model:Model):
     cache["pollutants"] = model.inp.pollutants
     cache["dwf"] = model.inp.dwf
     return cache
+
+
+
+#def _CreateCustomPollutLoadingCache(model:Model):
+#    cache = {}
+#    cache["pollutants"] = load_custom_daily_profile(filename)
+#    return cache

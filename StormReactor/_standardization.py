@@ -1,6 +1,47 @@
 import warnings
 from StormReactor.defs import REQUIRED_PARAMETERS, METHODS
 from StormReactor.defs.ElementType import ElementType
+import numpy as np
+from collections import Counter
+
+def _count_ids(ids:list):
+    return Counter(ids)
+
+def _standardize_config(config, model):
+    """
+    standardize the configuration for the water quality model
+    sorts WQ configurations by priority and normalizes the priority values
+    checks for duplicate priorities for the same node
+
+    :param config: list, list of WQConfig objects
+    :type config: list
+    :param model: Model, swmmio model
+    :type model: Model
+    :return: list of WQConfig objects
+    :rtype: list
+    """
+    methods = np.unique([c.method for c in config])
+    config = sorted(config, key=lambda c: c.priority)
+
+    link_to_node = model.links().InletNode.to_dict()
+    node_ids = [link_to_node[c.element_id] if c.element_type == ElementType.Links else c.element_id for c in config]
+    priorities = [c.priority for c in config]
+
+    for node_id in np.unique(node_ids):
+        node_subset = np.array(priorities)[np.array(node_ids) == node_id]
+        priorities_subset = np.array(priorities)[np.array(node_ids) == node_id]
+        
+        if len(np.unique(priorities_subset)) != len(priorities_subset):
+            warnings.warn(f"Duplicate priorities found for node {node_id}; using arbitrary order")
+
+    normalized_priority = np.argsort(priorities)
+    for ii, _ in enumerate(config):
+        config[ii].priority = normalized_priority[ii]
+
+
+    return config
+    #if len(methods) > 1:
+        
 
 def _standardize_method(method:str):
     if method not in METHODS:
@@ -16,7 +57,6 @@ def _standardize_parameters(parameters, method:str):
     for param in parameters:
         if param not in REQUIRED_PARAMETERS[method]:
             warnings.warn(f"Parameter {param} is not a valid parameter for {method} method and will be ignored.")
-
 
 def _standardize_element(element_id, model):
     all_elements = list(model.nodes().index) + list(model.links().index)

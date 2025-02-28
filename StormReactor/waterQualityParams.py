@@ -1,5 +1,11 @@
-
 #TODO: finish adding units to the docstrings, double check parameter names and types
+
+import warnings
+import pandas as pd
+from pathlib import Path
+
+
+ELEMENT_TYPES = ["subcatchments"]
 
 
 class WQParams(dict):
@@ -161,3 +167,51 @@ class WQParams(dict):
         self["multiplier"] = multiplier
         return self
     
+
+    def CustomPollutLoading(self, filename:str|Path) -> None:
+        """        
+        :param filename: str, name of the file containing the custom pollutant loading data
+        :type filename: str
+        """
+        self.clear()
+        self["method"] = "CustomPollutLoading"
+        self["filename"] = filename
+        
+        return self
+
+
+def _standardize_custom_daily_profile(custom_profile, model, element_type):
+    if element_type not in ELEMENT_TYPES:
+        raise ValueError(f"Invalid element_type: {element_type}. Must be one of: {ELEMENT_TYPES}")
+
+    custom_profile.columns = [col.strip() for col in custom_profile.columns]
+    
+    if custom_profile.isna().sum().sum() > 0:
+        raise ValueError("The viral_load_profiles dataframe contains NaN values.")
+    
+    timestep = (pd.to_datetime('2000-01-01 ' + str(custom_profile.index[1])) - pd.to_datetime('2000-01-01 ' + str(custom_profile.index[0])))
+    if not timestep * custom_profile.shape[0] == pd.Timedelta('1 days 00:00:00'):
+        raise ValueError("The viral_load_profiles dataframe does not have a 24-hour time range.")
+    
+    # compare loaded profile columns against model
+    model_elements = getattr(model.inp, element_type).index
+
+    missing_elements = [element for element in model_elements if element not in custom_profile.columns.tolist()]
+    if missing_elements:
+        raise ValueError(f"The viral_load_profiles dataframe is missing the following elements: {missing_elements}")
+    
+    extra_elements = [element for element in custom_profile.columns if element not in model_elements]
+    if extra_elements:
+        warnings.warn(f"Warning: The viral_load_profiles dataframe contains the following extra elements: {extra_elements}")
+    
+    return custom_profile
+
+
+def load_custom_daily_profile(file_path, element_type, model=None):
+    custom_profile = pd.read_csv(file_path, header=5, index_col=0)
+    
+    custom_profile.index = pd.to_datetime(custom_profile.index, format='%H:%M').time
+    
+    _standardize_custom_daily_profile(custom_profile=custom_profile, model=model, element_type=element_type)
+    return custom_profile
+
