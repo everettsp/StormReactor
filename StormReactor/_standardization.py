@@ -59,18 +59,19 @@ def _standardize_parameters(parameters, method:str):
             warnings.warn(f"Parameter {param} is not a valid parameter for {method} method and will be ignored.")
 
 def _standardize_element(element_id, model):
-    all_elements = list(model.nodes().index) + list(model.links().index)
+    all_elements = list(model.nodes().index) + list(model.links().index) + list(model.inp.subcatchments.index)
     if element_id not in all_elements:
         raise ValueError(f"Element {element_id} not found in model")
 
 def _standardize_element_type(element_type):
-    if element_type not in ["node", "link"]:
-        raise ValueError(f"Element type {element_type} not available. Must be 'node' or 'link'")
-
-    if element_type == "node":
+    if element_type in ["node","nodes"]:
         element_type = ElementType.Nodes
-    else:
+    elif element_type in ["link","links"]:
         element_type = ElementType.Links
+    elif element_type in ["subcatchment","subcatchments"]:
+        element_type = ElementType.Subcatchments
+    else:
+        raise ValueError(f"Element type {element_type} not available. Must be 'node', 'link', or 'subcatchment'")
 
     return element_type
 

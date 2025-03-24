@@ -12,7 +12,7 @@ METHODS = ["EventMeanConc",
            "ViralDecay",
            "ConstantWasteLoad",
            "DryWeatherLoading",
-           "CustomPollutLoading",
+           "CustomPollutProfile",
            ]
 
 #TODO: might be cleaner to switch these this to a class
@@ -30,6 +30,6 @@ REQUIRED_PARAMETERS["SewageFlux"] = ["Qhalf","v_sett","Smax","Resus_max","n"]
 REQUIRED_PARAMETERS["ViralDecay"] = ["n","k","copollutant"]
 REQUIRED_PARAMETERS["ConstantWasteLoad"] = ["L"]
 REQUIRED_PARAMETERS["DryWeatherLoading"] = ["multiplier"]
-REQUIRED_PARAMETERS["CustomPollutLoading"] = ["filename"]
+REQUIRED_PARAMETERS["CustomPollutProfile"] = ["filename"]
 
 REQUIRED_PARAMETERS = {key: UNIVERAL_PARAMETERS + value for key, value in REQUIRED_PARAMETERS.items()}

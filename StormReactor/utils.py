@@ -1,7 +1,7 @@
-
 import numpy as np
 from swmmio import Model
 from datetime import datetime
+#from StormReactor.WaterQualityCaches import _CreateDryWeatherLoadingCache
 
 
 def get_conduit_volume(model:Model, id:str=None):
@@ -154,7 +154,6 @@ def is_weekend(ct: datetime) -> bool:
     return is_weekend
 
 
-from StormReactor.WaterQualityCaches import _CreateDryWeatherLoadingCache
 
 def get_dwf_load(element:str, pollutant:str, datestamp:datetime, dt:int, cache:dict=None):
     # determine which pattern to use

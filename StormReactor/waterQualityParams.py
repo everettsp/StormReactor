@@ -5,8 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 
-ELEMENT_TYPES = ["subcatchments"]
-
+from StormReactor.defs.ElementType import ElementType
 
 class WQParams(dict):
     def __init__(self) -> None:
@@ -168,21 +167,20 @@ class WQParams(dict):
         return self
     
 
-    def CustomPollutLoading(self, filename:str|Path) -> None:
+    def CustomPollutProfile(self, filename:str|Path) -> None:
         """        
         :param filename: str, name of the file containing the custom pollutant loading data
         :type filename: str
         """
         self.clear()
-        self["method"] = "CustomPollutLoading"
+        self["method"] = "CustomPollutProfile"
         self["filename"] = filename
-        
         return self
 
 
 def _standardize_custom_daily_profile(custom_profile, model, element_type):
-    if element_type not in ELEMENT_TYPES:
-        raise ValueError(f"Invalid element_type: {element_type}. Must be one of: {ELEMENT_TYPES}")
+    if element_type is not ElementType.Subcatchments:
+        raise ValueError(f"Invalid element_type: {element_type}. Must be one of: {ElementType.Subcatchments}")
 
     custom_profile.columns = [col.strip() for col in custom_profile.columns]
     
@@ -194,7 +192,7 @@ def _standardize_custom_daily_profile(custom_profile, model, element_type):
         raise ValueError("The viral_load_profiles dataframe does not have a 24-hour time range.")
     
     # compare loaded profile columns against model
-    model_elements = getattr(model.inp, element_type).index
+    model_elements = getattr(model.inp, "subcatchments").index
 
     missing_elements = [element for element in model_elements if element not in custom_profile.columns.tolist()]
     if missing_elements:
@@ -208,7 +206,7 @@ def _standardize_custom_daily_profile(custom_profile, model, element_type):
 
 
 def load_custom_daily_profile(file_path, element_type, model=None):
-    custom_profile = pd.read_csv(file_path, header=5, index_col=0)
+    custom_profile = pd.read_csv(file_path, index_col=0)
     
     custom_profile.index = pd.to_datetime(custom_profile.index, format='%H:%M').time
     

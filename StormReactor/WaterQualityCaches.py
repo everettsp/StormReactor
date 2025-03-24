@@ -17,7 +17,7 @@ def _CreateDryWeatherLoadingCache(model:Model):
 
 
 
-#def _CreateCustomPollutLoadingCache(model:Model):
+#def _CreateCustomPollutProfileCache(model:Model):
 #    cache = {}
 #    cache["pollutants"] = load_custom_daily_profile(filename)
 #    return cache
