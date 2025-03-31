@@ -27,16 +27,17 @@ def _standardize_config(config, model):
     node_ids = [link_to_node[c.element_id] if c.element_type == ElementType.Links else c.element_id for c in config]
     priorities = [c.priority for c in config]
 
-    for node_id in np.unique(node_ids):
-        node_subset = np.array(priorities)[np.array(node_ids) == node_id]
-        priorities_subset = np.array(priorities)[np.array(node_ids) == node_id]
-        
-        if len(np.unique(priorities_subset)) != len(priorities_subset):
-            warnings.warn(f"Duplicate priorities found for node {node_id}; using arbitrary order")
+    polluts = [c.pollutant for c in config]
+    for pollut in np.unique(polluts):
+        for node_id in np.unique(node_ids):
+            priorities_subset = np.array(priorities)[(np.array(node_ids) == node_id) & (pollut == np.array(polluts))]
+            
+            if len(np.unique(priorities_subset)) != len(priorities_subset):
+                warnings.warn(f"Duplicate priorities found for node {node_id}; using arbitrary order")
 
-    normalized_priority = np.argsort(priorities)
-    for ii, _ in enumerate(config):
-        config[ii].priority = normalized_priority[ii]
+    #normalized_priority = np.argsort(priorities)
+    #for ii, _ in enumerate(config):
+    #    config[ii].priority = normalized_priority[ii]
 
 
     return config

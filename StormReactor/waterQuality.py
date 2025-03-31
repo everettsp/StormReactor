@@ -104,12 +104,16 @@ class waterQuality:
 
         self.node_to_link = self._node_to_link()
         self.link_to_node = self._link_to_node()
-        
+        self.subcatchment_to_node = self._subcatchment_to_node()
+
     def _link_to_node(self):
         return self.model.links().OutletNode.to_dict()
 
     def _node_to_link(self):
         return {row.InletNode: link for link, row in self.model.links().iterrows()}
+    
+    def _subcatchment_to_node(self):
+        return self.model.subcatchments().Outlet.to_dict()
     
     def split_ids(self, id, element_type):
         if element_type == ElementType.Nodes:
@@ -121,6 +125,7 @@ class waterQuality:
         else:
             raise ValueError(f"Element type {element_type} is not valid.")
         return node_id, link_id
+    
     def get_Cin(self, id, pollutant, element_type):
         """
         Get the current concentration of a pollutant at a node/link.
@@ -135,7 +140,7 @@ class waterQuality:
 
         # if state is initialized to nan, it's the first in a series of treatment methods; grab from model
         
-        if Cin is np.nan:
+        if np.isnan(Cin):
             if element_type == ElementType.Nodes:
                 # Get SWMM parameter
                 Cin = self.sim._model.getNodePollut(id, tka.NodePollut.inflowQual.value)[pollutant_index]
@@ -157,6 +162,11 @@ class waterQuality:
             ##node_id = self._link_to_node_id(id)
             #self.storage._set_state(element_id=id, pollutant=pollutant, value=value)
         else:
+
+            # IMPORTANT here we get the pollut concentration twice
+            # once from the model and once from the storage
+            # since the model can't be updated multiple times within one timestep, we store it in 'state'
+            # 
             self.sim._model.setNodePollut(id, pollutant, value)
             self.storage._set_state(element_id=id, pollutant=pollutant, value=value)
 
@@ -177,13 +187,20 @@ class waterQuality:
             raise(PySWMMStepAdvanceNotSupported)
 
         # for each config, run the water quality method
-        for c in tqdm(self.config):
+        for c in self.config:
 
             # if it's the first time step at the element id, set the state to 0
             # priority is normalised such that 0 is the highest priority and priorities increment by 1
-            if c.priority == 0:
-                self.storage._set_state(element_id=c.element_id, pollutant=c.pollutant, value=0)
 
+            if c.element_type == ElementType.Subcatchments:
+                element_id = self.subcatchment_to_node[c.element_id]
+            else:
+                element_id = c.element_id
+
+            if c.priority == 1:
+                self.storage._set_state(element_id=element_id, pollutant=c.pollutant, value=np.nan)
+        
+        for c in self.config:
             self.method[c.method](id=c.element_id, pollutant=c.pollutant, parameters=c.parameters, element_type=c.element_type)
 
 
@@ -233,6 +250,8 @@ class waterQuality:
             #CustomPollutLoadingCache = _CreateCustomPollutLoadingCache(self.model, self.config)
 
         if "CustomPollutProfile" in methods:
+            simulation_timestep = self.model.inp.options.loc["WET_STEP",:].values[0]
+            profile_timestep_seconds = int(pd.Timedelta(simulation_timestep).total_seconds())
             
             first_instance = np.where([cfg.method == "CustomPollutProfile" for cfg in self.config])[0][0]
             custom_profile = load_custom_daily_profile(
@@ -242,6 +261,10 @@ class waterQuality:
             
                     # Get the profile timestep in hours
             profile_timestep = (custom_profile.index[1].hour*60+custom_profile.index[1].minute - custom_profile.index[0].hour*60+custom_profile.index[0].minute) * 60
+
+
+            # Resample the custom profile to match the profile timestep in seconds
+            #custom_profile = custom_profile.resample(f'{profile_timestep_seconds}S').interpolate(method='linear')
 
 
             self.cache.update({"custom_profile": custom_profile, "profile_timestep": profile_timestep})
@@ -289,7 +312,6 @@ class waterQuality:
 
         self.set_Cin(value=Cnew, id=id, pollutant=pollutant, element_type=element_type)
 
-
     def _DryWeatherLoading(self, id, pollutant, parameters, element_type):
 
         """
@@ -334,27 +356,31 @@ class waterQuality:
 
     def _CustomPollutProfile(self, id, pollutant, parameters, element_type):
         
-        _standardize_parameters(parameters, method="CustomPollutProfile")
+        #_standardize_parameters(parameters, method="CustomPollutProfile")
         
         # if applied to a subcatchment, subcatchment must have an outlet node (as opposed to another subcatchment)
-        if element_type == ElementType.Subcatchments:
-            outlets = self.model.subcatchments().Outlet.to_dict()
-        else:
-            raise ValueError(f"CustomPollutProfile method can only be applied to subcatchments. Element type {element_type} is not valid.")
-        nodes = self.model.nodes().index
+        #if element_type == ElementType.Subcatchments:
+        #outlets = self.model.subcatchments().Outlet.to_dict()
+        #else:
+        #    raise ValueError(f"CustomPollutProfile method can only be applied to subcatchments. Element type {element_type} is not valid.")
+        
+        
+        #nodes = self.model.nodes().index
+        node_id = self.subcatchment_to_node[id]
 
-        if outlets[id] not in nodes:
-            raise ValueError(f"Subcatchment {id} does not have an outlet node in the model.")
 
+        #if outlets[id] not in nodes:
+        #    raise ValueError(f"Subcatchment {id} does not have an outlet node in the model.")
+        
         profile = self.cache["custom_profile"]
         profile_timestep = self.cache["profile_timestep"]
-
+        #profile_timestep = 100
         current_step = self.sim.current_time
         dt = (current_step - self.last_timestep).total_seconds()
-
+        #dt = 100
         # get the loading rate from the profile
         loading = profile.loc[profile.index.asof(current_step.time()), id]
-        
+        #loading = 10
         # convert to [unit]/s
         loading_rate = loading / profile_timestep # s^-1
 
@@ -362,13 +388,12 @@ class waterQuality:
         timestep_loading = loading_rate * dt
 
         # get flow rate and volume        
-        node_id = outlets[id]
-        
         # get concentration in
-        Cin = self.get_Cin(node_id, pollutant, element_type)
+        Cin = self.get_Cin(node_id, pollutant, ElementType.Nodes)
 
 
         Q = self.sim._model.getNodeResult(node_id, tka.NodeResults.totalinflow.value)
+        #Q = 10
         V = Q * dt
 
         # add to Cin as concentration
@@ -379,7 +404,7 @@ class waterQuality:
 
         # set new concentration
         self.set_Cin(value=Cin, id=node_id, pollutant=pollutant, element_type=element_type)
-
+        
     def _EventMeanConc(self, id, pollutant, parameters, element_type):
         """
         Event Mean Concentration Treatment (SWMM Water Quality Manual, 2016)
